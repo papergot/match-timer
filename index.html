@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#06090e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="format-detection" content="telephone=no,date=no,address=no,email=no">
+<title>比赛计时</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png">
+<style>
+  *,*::before,*::after{box-sizing:border-box}
+  :root{
+    --bg:#06090e;
+    --text:#eef4fc;
+    --muted:#8394aa;
+    --line:rgba(255,255,255,.08);
+    --left:#2dd4bf;
+    --right:#f6a723;
+    --danger:#ff5a5a;
+    --hud-h:clamp(46px,8vh,62px);
+    --r:clamp(16px,1.8vw,26px);
+    --pad:clamp(10px,1.4vw,20px);
+  }
+  html,body{margin:0;padding:0;height:100%}
+  body{
+    height:100vh;            /* 老内核回退 */
+    height:100dvh;
+    overflow:hidden;
+    overscroll-behavior:none;
+    background:
+      radial-gradient(120% 120% at 10% -10%, rgba(45,212,191,.11), transparent 55%),
+      radial-gradient(120% 120% at 90% 110%, rgba(246,167,35,.10), transparent 55%),
+      linear-gradient(180deg,#080d15,#05070b 65%);
+    color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    user-select:none;-webkit-user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-touch-callout:none;
+    touch-action:manipulation;
+    display:flex;flex-direction:column;
+    padding:0;               /* 老内核回退 */
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+  b{font-weight:600}
+
+  /* ---------- HUD ---------- */
+  .hud{
+    flex:0 0 auto;height:var(--hud-h);
+    display:flex;align-items:center;gap:12px;
+    padding:0 var(--pad);
+  }
+  .brand{display:flex;align-items:center;gap:8px;font-size:clamp(11px,1vw,14px);letter-spacing:.14em;color:var(--muted);font-weight:600;white-space:nowrap}
+  .brand i{width:7px;height:7px;border-radius:50%;background:var(--left);box-shadow:0 0 12px var(--left);flex:0 0 auto}
+  .hud-meta{flex:1;display:flex;justify-content:center;gap:clamp(6px,1vw,14px);font-size:clamp(11px,.98vw,14px);color:var(--muted);white-space:nowrap;overflow:hidden}
+  .hud-meta b{color:#cfdaea;font-variant-numeric:tabular-nums}
+  .hud-meta .sep{opacity:.35}
+  .hud-actions{display:flex;gap:clamp(5px,.6vw,9px);flex:0 0 auto}
+
+  .mini{
+    min-height:38px;padding:7px 13px;border-radius:11px;
+    border:1px solid var(--line);background:rgba(255,255,255,.045);
+    color:#c9d5e4;font-size:clamp(11px,.95vw,13px);letter-spacing:.03em;
+    transition:background .15s,transform .1s,opacity .2s;white-space:nowrap;
+  }
+  .mini:hover{background:rgba(255,255,255,.09)}
+  .mini:active{transform:scale(.96)}
+  .mini[disabled]{opacity:.28;pointer-events:none}
+  .mini.danger{color:#ffd6d6;border-color:rgba(255,90,90,.4);background:rgba(255,90,90,.14)}
+  .mini.primary{background:linear-gradient(160deg,#2dd4bf,#14a08f);color:#04231d;border-color:transparent;font-weight:700}
+  /* 原生 APK 外壳里本身已是全屏，隐藏「全屏」按钮 */
+  .in-app #btnFull{display:none}
+
+  /* ---------- 主面板：左右各一半，整块就是按钮 ---------- */
+  .board{
+    flex:1;min-height:0;
+    display:grid;grid-template-columns:1fr 1fr;
+    gap:clamp(10px,1.6vw,22px);
+    padding:0 var(--pad) clamp(8px,1.5vh,18px);
+  }
+  .side{
+    --accent:var(--left);
+    /* 预置透明渐变色阶：不依赖 color-mix，兼容较老的浏览器内核 */
+    --a20:rgba(45,212,191,.20);
+    --a26:rgba(45,212,191,.26);
+    --a55:rgba(45,212,191,.55);
+    --a60:rgba(45,212,191,.60);
+    --a70:rgba(45,212,191,.70);
+    --a80:rgba(45,212,191,.80);
+    --a85:rgba(45,212,191,.85);
+    --accent-lite:#7de2d4;
+    position:relative;overflow:hidden;
+    border-radius:var(--r);border:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    transition:border-color .3s,box-shadow .35s,background .3s;
+    cursor:pointer;-webkit-tap-highlight-color:transparent;outline:none;
+  }
+  .side#sideR{
+    --accent:var(--right);
+    --a20:rgba(246,167,35,.20);
+    --a26:rgba(246,167,35,.26);
+    --a55:rgba(246,167,35,.55);
+    --a60:rgba(246,167,35,.60);
+    --a70:rgba(246,167,35,.70);
+    --a80:rgba(246,167,35,.80);
+    --a85:rgba(246,167,35,.85);
+    --accent-lite:#f9c46f;
+  }
+  .side::before{
+    content:"";position:absolute;top:0;right:0;bottom:0;left:0;inset:0;pointer-events:none;opacity:0;transition:opacity .35s;
+    background:radial-gradient(72% 58% at 50% 44%, var(--a26), transparent 72%);
+  }
+  .side.is-active{border-color:var(--a55);
+    box-shadow:0 0 0 1px var(--a20),
+               0 0 70px -14px var(--a55),
+               inset 0 0 100px -50px var(--a80);}
+  .side.is-active::before{opacity:1}
+  /* 待机时两侧各自透出本方色调，提示「这一整块可以点」 */
+  .side.is-idle::before{opacity:.3}
+  .side:focus-visible{outline:2px solid var(--accent);outline-offset:5px}
+
+  /* 按下瞬间的反馈光，盖在内容之上、不挡点击 */
+  .side::after{
+    content:"";position:absolute;top:0;right:0;bottom:0;left:0;inset:0;pointer-events:none;opacity:0;
+    background:radial-gradient(70% 60% at 50% 52%, var(--a26), transparent 72%);
+  }
+  .side.hit::after{animation:hitFlash .38s ease-out}
+  @keyframes hitFlash{0%{opacity:.85}100%{opacity:0}}
+
+  .side-head{
+    position:absolute;top:0;left:0;right:0;
+    display:flex;justify-content:space-between;align-items:center;
+    padding:clamp(9px,1.5vh,15px) clamp(12px,1.5vw,20px);
+    font-size:clamp(11px,1.05vw,15px);letter-spacing:.14em;color:var(--muted);pointer-events:none;
+  }
+  .side-head .name{font-weight:600;color:#94a5ba}
+  .side.is-active .side-head .name{color:var(--accent)}
+  .side-head .stat{font-size:.82em;letter-spacing:.1em;opacity:.85;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+
+  .clock{position:relative;display:flex;align-items:baseline;justify-content:center;
+    font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+    font-weight:700;line-height:.92;letter-spacing:-.035em;padding:0 2%;}
+  .clock .main{font-size:clamp(52px,12.4vw,196px);color:#67768b;transition:color .25s,text-shadow .25s}
+  .clock .tenths{font-size:clamp(22px,3.9vw,64px);font-weight:600;letter-spacing:0;color:#435064;transition:color .25s}
+  .side.is-active .clock .main{color:#fff;text-shadow:0 0 46px var(--a60)}
+  .side.is-active .clock .tenths{color:var(--accent-lite)}
+  .side.is-low .clock .main{color:#ff6b6b;text-shadow:0 0 40px rgba(255,80,80,.55);animation:blink 1s steps(1,end) infinite}
+  .side.is-low .clock .tenths{color:#ff9a9a}
+  .side.is-paused .clock .main{opacity:.42}
+  .side.is-paused .clock .tenths{opacity:.42}
+
+  .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.055)}
+  .bar i{display:block;height:100%;width:100%;transform-origin:left center;transform:scaleX(1);
+    background:var(--a85);box-shadow:0 0 14px var(--a60)}
+
+  .pop{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);
+    font-size:clamp(26px,3.6vw,58px);font-weight:800;color:var(--accent);opacity:0;pointer-events:none;
+    text-shadow:0 0 30px var(--a70)}
+  .pop.go{animation:popup .9s cubic-bezier(.2,.8,.3,1)}
+
+  /* 面板底部的操作提示 */
+  .side-hint{
+    position:absolute;left:0;right:0;bottom:clamp(13px,2.6vh,26px);
+    text-align:center;font-size:clamp(11px,1.1vw,16px);letter-spacing:.16em;
+    color:var(--muted);transition:color .25s;pointer-events:none;
+  }
+  .side.is-active .side-hint{color:var(--accent)}
+  .side.is-idle .side-hint{color:#aebdce;animation:breathe 3s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:.58}50%{opacity:1}}
+
+  /* ---------- 弹层 ---------- */
+  .sheet{
+    position:fixed;top:0;right:0;bottom:0;left:0;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    padding:14px;background:rgba(3,6,10,.74);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+    animation:fade .18s ease-out;
+  }
+  .sheet[hidden]{display:none}
+  .card{
+    width:min(600px,100%);max-height:calc(100vh - 28px);max-height:calc(100dvh - 28px);overflow:auto;
+    padding:clamp(16px,2.2vw,26px);border-radius:22px;
+    border:1px solid rgba(255,255,255,.1);
+    background:linear-gradient(180deg,#121b28,#0a111a);
+    box-shadow:0 40px 90px -34px #000;
+    animation:rise .22s cubic-bezier(.2,.8,.3,1);
+    -webkit-overflow-scrolling:touch;
+  }
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .card h2{margin:0;font-size:clamp(16px,1.7vw,21px);letter-spacing:.04em}
+  .field{padding:14px 0;border-top:1px solid rgba(255,255,255,.055)}
+  .field-label{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    font-size:clamp(12px,1.1vw,15px);color:#a9b8ca;letter-spacing:.04em}
+  .field-label b{color:#fff;font-size:1.15em;font-variant-numeric:tabular-nums}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+  .chip{
+    min-height:40px;padding:8px 14px;border-radius:999px;
+    border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.04);
+    color:#c7d3e2;font-size:clamp(12px,1.05vw,14px);font-variant-numeric:tabular-nums;
+    transition:background .15s,color .15s;white-space:nowrap;
+  }
+  .chip:active{transform:scale(.97)}
+  .chip.on{background:var(--left);border-color:transparent;color:#04231d;font-weight:700}
+  .fine{display:flex;gap:8px;flex-wrap:wrap}
+  .fine .mini{flex:1 1 0;min-width:62px;text-align:center}
+
+  .switch-row{display:flex;align-items:center;justify-content:space-between;gap:14px;
+    padding:11px 0;font-size:clamp(12px,1.1vw,15px);color:#c3cfdd;cursor:pointer;
+    border-bottom:1px solid rgba(255,255,255,.05)}
+  .switch-row:last-of-type{border-bottom:0}
+  .switch-row input{position:absolute;opacity:0;pointer-events:none}
+  .switch-row i{flex:0 0 auto;width:46px;height:27px;border-radius:999px;background:rgba(255,255,255,.14);position:relative;transition:background .2s}
+  .switch-row i::after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;transition:transform .2s}
+  .switch-row input:checked + i{background:var(--left)}
+  .switch-row input:checked + i::after{transform:translateX(19px)}
+  .tip{margin:12px 0 0;font-size:clamp(11px,.95vw,13px);line-height:1.7;color:#6f8095}
+
+  .row-end{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+  .muted{color:#8b9bb0;font-size:clamp(12px,1.05vw,14px);line-height:1.7}
+  .card.narrow{width:min(420px,100%)}
+  .card.narrow h2{margin-bottom:8px}
+
+  /* ---------- 结果 ---------- */
+  .result-card{text-align:center;width:min(640px,100%)}
+  .kicker{display:inline-block;font-size:clamp(10px,.95vw,13px);letter-spacing:.32em;
+    color:var(--danger);border:1px solid rgba(255,90,90,.35);background:rgba(255,90,90,.1);
+    border-radius:999px;padding:5px 14px;margin-bottom:14px}
+  .result-card h2{margin:0 0 6px;font-size:clamp(30px,5vw,58px);letter-spacing:.04em;
+    text-shadow:0 0 60px rgba(246,167,35,.25)}
+  .result-sub{margin:0 0 18px;color:#93a4ba;font-size:clamp(13px,1.2vw,17px);letter-spacing:.06em}
+  .result-times{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 20px}
+  .result-times > div{padding:14px 10px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03)}
+  .result-times span{display:block;font-size:clamp(10px,.95vw,13px);color:#7f90a6;letter-spacing:.18em;margin-bottom:6px}
+  .result-times b{font-size:clamp(21px,2.6vw,34px);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .result-times > div.win{border-color:rgba(246,167,35,.4);background:rgba(246,167,35,.09)}
+  .result-times > div.lose b{color:#ff7676}
+  .result-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .result-actions .mini{min-height:46px;padding:10px 22px;font-size:clamp(13px,1.15vw,15px)}
+  .result-note{margin:14px 0 0;font-size:clamp(10px,.9vw,12px);color:#5f6f84}
+
+  /* ---------- 竖屏提示 ---------- */
+  .rotate{
+    position:fixed;top:0;right:0;bottom:0;left:0;inset:0;z-index:90;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;text-align:center;padding:30px;
+    background:rgba(4,7,12,.94);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  }
+  .rotate svg{width:64px;height:64px;opacity:.9;animation:rot 2.6s ease-in-out infinite}
+  .rotate p{margin:0;font-size:16px;letter-spacing:.1em;color:#c9d5e4}
+  .rotate small{color:#6d7d92;font-size:12px;letter-spacing:.05em}
+  @media (orientation:portrait){ .rotate:not(.hide){display:flex} }
+
+  @keyframes blink{50%{opacity:.35}}
+  @keyframes popup{
+    0%{opacity:0;transform:translate(-50%,-30%) scale(.7)}
+    22%{opacity:1;transform:translate(-50%,-52%) scale(1.06)}
+    100%{opacity:0;transform:translate(-50%,-125%) scale(1)}
+  }
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes rise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+  @keyframes rot{0%,45%{transform:rotate(0)}75%,100%{transform:rotate(90deg)}}
+
+  /* 小屏横向 */
+  @media (max-width:900px){
+    .hud-meta{font-size:11px;gap:6px}
+    .hud-meta .opt{display:none}
+  }
+  @media (max-height:380px){
+    :root{--hud-h:46px}
+    .side-head{font-size:11px;padding:7px 12px}
+    .hud-meta{font-size:10px}
+    .mini{min-height:34px;padding:5px 10px;font-size:11px}
+    .clock .main{font-size:clamp(38px,10.4vw,120px)}
+    .clock .tenths{font-size:clamp(15px,3.2vw,42px)}
+    .side-hint{font-size:10px;bottom:10px}
+  }
+  /* 手机横屏（可视高度约 380~480px）：压缩设置表单，减少滚动 */
+  @media (max-height:480px){
+    .card{padding:14px 18px;border-radius:18px}
+    .card h2{font-size:16px}
+    .field{padding:9px 0}
+    .chips{margin:8px 0 2px;gap:6px}
+    .chip{min-height:34px;padding:6px 11px;font-size:12px}
+    .fine .mini{min-height:34px;font-size:11px}
+    .switch-row{padding:8px 0;font-size:12px}
+    .tip{display:none}
+    .row-end{margin-top:12px}
+    .result-card h2{font-size:clamp(26px,4.4vw,40px)}
+    .kicker{margin-bottom:10px}
+    .result-sub{margin-bottom:12px}
+    .result-times{margin-bottom:14px;gap:8px}
+    .result-times > div{padding:10px 8px}
+    .result-actions .mini{min-height:40px;padding:8px 16px}
+    .result-note{margin-top:10px}
+  }
+  @media (max-height:480px) and (min-width:640px){
+    #sheet .card{width:min(780px,100%)}
+    .card-cols{display:grid;grid-template-columns:1fr 1fr;column-gap:26px}
+    .col .field:first-child{border-top:0;padding-top:4px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.001s !important;transition-duration:.001s !important}
+  }
+</style>
+</head>
+<body>
+
+<header class="hud">
+  <div class="brand"><i></i>比赛计时</div>
+  <div class="hud-meta">
+    <span>初始 <b id="metaInit">3:00</b></span>
+    <span class="sep">·</span>
+    <span>加秒 <b id="metaInc">+5s</b></span>
+    <span class="sep opt">·</span>
+    <span class="opt">交棒 <b id="metaSwaps">0</b> 次</span>
+  </div>
+  <div class="hud-actions">
+    <button class="mini" id="btnPause" disabled>暂停</button>
+    <button class="mini" id="btnSet">设置</button>
+    <button class="mini" id="btnFull">全屏</button>
+    <button class="mini" id="btnReset">重置</button>
+  </div>
+</header>
+
+<main class="board">
+  <section class="side" id="sideL" role="button" tabindex="0" aria-label="左方计时区，按下开始或交棒">
+    <div class="side-head"><span class="name">左方</span><span class="stat" id="statL">待机</span></div>
+    <div class="clock"><span class="main" id="mainL">03:00</span><span class="tenths" id="tenthL">.0</span></div>
+    <div class="pop" id="popL">+5s</div>
+    <div class="side-hint" id="hintL">点击开始计时</div>
+    <div class="bar"><i id="barL"></i></div>
+  </section>
+
+  <section class="side" id="sideR" role="button" tabindex="0" aria-label="右方计时区，按下开始或交棒">
+    <div class="side-head"><span class="name">右方</span><span class="stat" id="statR">待机</span></div>
+    <div class="clock"><span class="main" id="mainR">03:00</span><span class="tenths" id="tenthR">.0</span></div>
+    <div class="pop" id="popR">+5s</div>
+    <div class="side-hint" id="hintR">点击开始计时</div>
+    <div class="bar"><i id="barR"></i></div>
+  </section>
+</main>
+
+<!-- 设置 -->
+<div class="sheet" id="sheet" hidden>
+  <div class="card">
+    <div class="card-head">
+      <h2>比赛设置</h2>
+      <button class="mini" id="sheetClose">完成</button>
+    </div>
+
+    <div class="card-cols">
+      <div class="col">
+        <div class="field">
+          <div class="field-label"><span>初始时间（双方相同）</span><b id="initVal">3:00</b></div>
+          <div class="chips" id="initChips"></div>
+          <div class="fine">
+            <button class="mini" data-init="-300">−5 分</button>
+            <button class="mini" data-init="-10">−10 秒</button>
+            <button class="mini" data-init="10">+10 秒</button>
+            <button class="mini" data-init="300">+5 分</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="field">
+          <div class="field-label"><span>每次交棒加秒</span><b id="incVal">+5 秒</b></div>
+          <div class="chips" id="incChips"></div>
+          <div class="fine">
+            <button class="mini" data-inc="-1">−1 秒</button>
+            <button class="mini" data-inc="1">+1 秒</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="switch-row"><span>最后 10 秒读秒提示音</span><input type="checkbox" id="optSound"><i></i></label>
+          <label class="switch-row"><span>交棒与超时震动</span><input type="checkbox" id="optVibe"><i></i></label>
+        </div>
+      </div>
+    </div>
+
+    <p class="tip">规则：待机时点哪一方，哪一方先开始计时；之后<b>按正在计时的一方</b>即停止本方并加秒，同时对方开始计时。点对方一侧无响应，所以连点也不会乱。任一方归零即全场暂停并判定超时。</p>
+  </div>
+</div>
+
+<!-- 重置确认 -->
+<div class="sheet" id="confirm" hidden>
+  <div class="card narrow">
+    <h2>重新开始？</h2>
+    <p class="muted">当前计时与交棒次数将被清空，设置保持不变。</p>
+    <div class="row-end">
+      <button class="mini" id="confirmNo">取消</button>
+      <button class="mini danger" id="confirmYes">重新开始</button>
+    </div>
+  </div>
+</div>
+
+<!-- 结果 -->
+<div class="sheet" id="result" hidden>
+  <div class="card result-card">
+    <div class="kicker">时间到</div>
+    <h2 id="resTitle">右方获胜</h2>
+    <p class="result-sub" id="resSub">左方时间已用尽</p>
+    <div class="result-times">
+      <div id="resCardL"><span>左方</span><b id="resL">00:00.0</b></div>
+      <div id="resCardR"><span>右方</span><b id="resR">00:00.0</b></div>
+    </div>
+    <div class="result-actions">
+      <button class="mini primary" id="btnAgain">再来一局</button>
+      <button class="mini" id="btnTune">调整设置</button>
+    </div>
+    <p class="result-note" id="resNote">「再来一局」回到待机，点击任一方重新开始</p>
+  </div>
+</div>
+
+<!-- 竖屏提示 -->
+<div class="rotate" id="rotate">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="7" y="2.5" width="10" height="19" rx="2.5"/>
+    <path d="M10.5 18.5h3"/>
+    <path d="M2 8a5 5 0 0 1 5-5"/>
+    <path d="M2 8l2.6-1.2M2 8l1.2 2.6"/>
+  </svg>
+  <p>请将手机横过来使用</p>
+  <small>横屏后左右两侧计时同时可见</small>
+  <button class="mini" id="rotateOk" style="margin-top:8px">仍然竖屏使用</button>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var CFG_KEY = 'matchTimer.cfg.v1';
+  var DEFAULTS = { initSec: 180, incSec: 5, sound: true, vibrate: true };
+  var INIT_CHOICES = [30, 60, 120, 180, 300, 600, 900, 1800];
+  var INC_CHOICES = [0, 1, 3, 5, 10, 15, 30];
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var sides = {
+    left: { root: $('sideL'), main: $('mainL'), tenth: $('tenthL'), bar: $('barL'), stat: $('statL'), pop: $('popL'), hint: $('hintL') },
+    right: { root: $('sideR'), main: $('mainR'), tenth: $('tenthR'), bar: $('barR'), stat: $('statR'), pop: $('popR'), hint: $('hintR') }
+  };
+
+  var el = {
+    metaInit: $('metaInit'), metaInc: $('metaInc'), metaSwaps: $('metaSwaps'),
+    btnPause: $('btnPause'), btnSet: $('btnSet'), btnFull: $('btnFull'), btnReset: $('btnReset'),
+    sheet: $('sheet'), sheetClose: $('sheetClose'), initChips: $('initChips'), incChips: $('incChips'),
+    initVal: $('initVal'), incVal: $('incVal'), optSound: $('optSound'), optVibe: $('optVibe'),
+    confirm: $('confirm'), confirmNo: $('confirmNo'), confirmYes: $('confirmYes'),
+    result: $('result'), resTitle: $('resTitle'), resSub: $('resSub'),
+    resL: $('resL'), resR: $('resR'), resCardL: $('resCardL'), resCardR: $('resCardR'), resNote: $('resNote'),
+    btnAgain: $('btnAgain'), btnTune: $('btnTune'),
+    rotate: $('rotate'), rotateOk: $('rotateOk')
+  };
+
+  // ---------- 配置 ----------
+  function loadCfg() {
+    var cfg = {};
+    for (var k in DEFAULTS) cfg[k] = DEFAULTS[k];
+    try {
+      var raw = localStorage.getItem(CFG_KEY);
+      if (raw) {
+        var o = JSON.parse(raw);
+        if (o && typeof o === 'object') {
+          if (isNum(o.initSec)) cfg.initSec = clamp(o.initSec, 10, 7200);
+          if (isNum(o.incSec)) cfg.incSec = clamp(o.incSec, 0, 600);
+          if (typeof o.sound === 'boolean') cfg.sound = o.sound;
+          if (typeof o.vibrate === 'boolean') cfg.vibrate = o.vibrate;
+        }
+      }
+    } catch (e) { /* 忽略损坏的本地配置 */ }
+    return cfg;
+  }
+  function saveCfg() {
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(S.cfg)); } catch (e) {}
+  }
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  // ---------- 状态 ----------
+  var S = {
+    cfg: loadCfg(),
+    leftMs: 0,
+    rightMs: 0,
+    active: null,      // 'left' | 'right' | null
+    running: false,
+    ended: false,
+    swaps: 0,
+    lastTick: 0,
+    lastSec: null
+  };
+  S.leftMs = S.rightMs = S.cfg.initSec * 1000;
+
+  function other(side) { return side === 'left' ? 'right' : 'left'; }
+  function msKey(side) { return side === 'left' ? 'leftMs' : 'rightMs'; }
+  function sideName(side) { return side === 'left' ? '左方' : '右方'; }
+
+  // ---------- 格式化 ----------
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  function fmt(ms) {
+    var t = Math.max(0, ms);
+    var total = Math.floor(t / 1000);
+    var m = Math.floor(total / 60);
+    var s = total % 60;
+    var d = Math.floor((t % 1000) / 100);
+    return { main: pad2(m) + ':' + pad2(s), tenth: '.' + d };
+  }
+  function fmtFull(ms) { var f = fmt(ms); return f.main + f.tenth; }
+  function fmtSec(sec) {
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m > 0 ? (m + ':' + pad2(s)) : (s + ' 秒');
+  }
+
+  // ---------- 声音 / 震动 ----------
+  var ac = null;
+  function ensureAudio() {
+    if (!S.cfg.sound) return;
+    try {
+      if (!ac) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) ac = new AC();
+      }
+      if (ac && ac.state === 'suspended') ac.resume();
+    } catch (e) { ac = null; }
+  }
+  function beep(freq, dur, gain, type) {
+    if (!S.cfg.sound || !ac) return;
+    try {
+      var t = ac.currentTime;
+      var o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain || 0.22, t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(ac.destination);
+      o.start(t); o.stop(t + dur + 0.03);
+    } catch (e) {}
+  }
+  function haptic(pattern) {
+    if (!S.cfg.vibrate) return;
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+  }
+  function chimeEnd() {
+    if (!S.cfg.sound || !ac) return;
+    var seq = [[880, 0], [880, 0.18], [660, 0.36], [440, 0.54]];
+    for (var i = 0; i < seq.length; i++) {
+      (function (f, d) { setTimeout(function () { beep(f, 0.22, 0.3, 'triangle'); }, d * 1000); })(seq[i][0], seq[i][1]);
+    }
+  }
+
+  // ---------- 屏幕常亮 ----------
+  var wakeLock = null;
+  function acquireWake() {
+    try {
+      if (!('wakeLock' in navigator) || wakeLock) return;
+      navigator.wakeLock.request('screen').then(function (wl) {
+        wakeLock = wl;
+        wl.addEventListener('release', function () { wakeLock = null; });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function releaseWake() {
+    try { if (wakeLock) wakeLock.release(); } catch (e) {}
+    wakeLock = null;
+  }
+
+  // ---------- 全屏 / 横屏 ----------
+  var immersiveTried = false;
+  function tryImmersive() {
+    if (immersiveTried) return;
+    immersiveTried = true;
+    tryFullscreen(true);
+  }
+  function tryFullscreen(on) {
+    var p;
+    try {
+      if (on) {
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+          p = document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        } else { p = Promise.resolve(); }
+      } else {
+        p = document.fullscreenElement && document.exitFullscreen ? document.exitFullscreen() : Promise.resolve();
+      }
+      if (p && p.then) {
+        p.then(lockOrientation).catch(function () {});
+      } else {
+        lockOrientation();
+      }
+    } catch (e) {}
+  }
+  function lockOrientation() {
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        var r = screen.orientation.lock('landscape');
+        if (r && r.catch) r.catch(function () {});
+      }
+    } catch (e) {}
+  }
+
+  // ---------- 计时核心 ----------
+  function resetMatch() {
+    S.leftMs = S.cfg.initSec * 1000;
+    S.rightMs = S.cfg.initSec * 1000;
+    S.active = null;
+    S.running = false;
+    S.ended = false;
+    S.swaps = 0;
+    S.lastTick = 0;
+    S.lastSec = null;
+    releaseWake();
+    el.result.hidden = true;
+    render();
+  }
+
+  /** 开始某一方的计时（待机状态下点哪一侧，就从哪一侧开始） */
+  function startWith(side) {
+    ensureAudio();
+    tryImmersive();
+    S.active = side;
+    S.running = true;
+    S.ended = false;
+    S.lastTick = Date.now();
+    S.lastSec = null;
+    acquireWake();
+    haptic(14);
+    flash(side);
+    render();
+  }
+
+  /** 点按某一侧：只有「正在计时」的一侧有效，点对方一侧不做任何事 */
+  function tapSide(side) {
+    if (S.ended) return;
+    if (S.active === null) { startWith(side); return; }   // 待机：点谁开始谁
+    if (S.active !== side) return;                        // 不是当前计时方：忽略（防误触）
+    if (!S.running) { resumeMatch(); return; }            // 暂停中：点自己继续
+    handOver(side);
+  }
+
+  /** 交棒：本方停止并加秒，对方开始计时 */
+  function handOver(side) {
+    addTime(side, S.cfg.incSec * 1000);
+    S.active = other(side);
+    S.swaps += 1;
+    S.lastTick = Date.now();
+    S.lastSec = null;
+    haptic(12);
+    flash(side);
+    render();
+  }
+
+  /** 按下的一瞬间闪一下，给操作者反馈 */
+  function flash(side) {
+    var root = sides[side].root;
+    root.classList.remove('hit');
+    void root.offsetWidth;
+    root.classList.add('hit');
+    setTimeout(function () { root.classList.remove('hit'); }, 420);
+  }
+
+  function addTime(side, ms) {
+    if (ms <= 0) return;
+    var key = msKey(side);
+    S[key] += ms;
+    var sec = Math.round(ms / 1000);
+    var pop = sides[side].pop;
+    pop.textContent = '+' + sec + 's';
+    pop.classList.remove('go');
+    void pop.offsetWidth;
+    pop.classList.add('go');
+  }
+
+  function resumeMatch() {
+    if (S.ended || S.active === null) return;
+    S.running = true;
+    S.lastTick = Date.now();
+    S.lastSec = null;
+    acquireWake();
+    render();
+  }
+
+  function pauseMatch() {
+    if (S.ended || S.active === null || !S.running) return;
+    S.running = false;
+    releaseWake();
+    render();
+  }
+
+  function togglePause() {
+    if (S.ended || S.active === null) return;
+    if (S.running) pauseMatch(); else resumeMatch();
+  }
+
+  function finish(loser) {
+    var key = msKey(loser);
+    S[key] = 0;
+    S.running = false;
+    S.ended = true;
+    S.active = null;
+    releaseWake();
+    haptic([0, 220, 90, 220, 90, 480]);
+    chimeEnd();
+    showResult(loser);
+    render();
+  }
+
+  function showResult(loser) {
+    var winner = other(loser);
+    el.resTitle.textContent = sideName(winner) + '获胜';
+    el.resSub.textContent = sideName(loser) + '时间已用尽';
+    el.resL.textContent = fmtFull(S.leftMs);
+    el.resR.textContent = fmtFull(S.rightMs);
+    el.resCardL.className = loser === 'left' ? 'lose' : 'win';
+    el.resCardR.className = loser === 'right' ? 'lose' : 'win';
+    el.resNote.textContent = '「再来一局」回到待机，点击任一方重新开始';
+    el.result.hidden = false;
+  }
+
+  // ---------- 主循环 ----------
+  function step() {
+    if (S.running && S.active) {
+      var now = Date.now();
+      var dt = now - S.lastTick;
+      if (dt > 0) {
+        S.lastTick = now;
+        var key = msKey(S.active);
+        var before = S[key];
+        S[key] = Math.max(0, before - dt);
+        watchWarning(S[key]);
+        if (S[key] <= 0) finish(S.active);
+      }
+    }
+    render();
+  }
+
+  function watchWarning(rem) {
+    var sec = Math.ceil(rem / 1000);
+    if (sec === S.lastSec) return;
+    S.lastSec = sec;
+    if (!S.cfg.sound) return;
+    if (sec === 10) beep(660, 0.13, 0.2, 'sine');
+    else if (sec <= 5 && sec >= 1) beep(920, 0.09, 0.26, 'square');
+  }
+
+  // ---------- 渲染 ----------
+  function setText(node, text) {
+    if (node && node.textContent !== text) node.textContent = text;
+  }
+
+  function render() {
+    var initMs = Math.max(1, S.cfg.initSec * 1000);
+
+    paintSide('left', S.leftMs, initMs);
+    paintSide('right', S.rightMs, initMs);
+
+    // 顶栏
+    setText(el.metaInit, fmtSec(S.cfg.initSec));
+    setText(el.metaInc, S.cfg.incSec > 0 ? '+' + S.cfg.incSec + 's' : '无');
+    setText(el.metaSwaps, String(S.swaps));
+
+    // 按钮可用性
+    var canPause = !S.ended && S.active !== null;
+    el.btnPause.disabled = !canPause;
+    setText(el.btnPause, canPause && !S.running ? '继续' : '暂停');
+    el.btnSet.disabled = S.active !== null;
+  }
+
+  function paintSide(side, ms, initMs) {
+    var s = sides[side];
+    var f = fmt(ms);
+    setText(s.main, f.main);
+    setText(s.tenth, f.tenth);
+
+    var pct = clamp(ms / initMs, 0, 1);
+    s.bar.style.transform = 'scaleX(' + pct.toFixed(4) + ')';
+
+    var isActive = S.active === side;
+    var isLow = isActive && S.running && ms <= 10000 && ms > 0;
+    s.root.classList.toggle('is-active', isActive);
+    s.root.classList.toggle('is-low', isLow);
+    s.root.classList.toggle('is-paused', isActive && !S.running && !S.ended);
+    s.root.classList.toggle('is-idle', S.active === null && !S.ended);
+
+    var stat;
+    if (S.ended) stat = ms <= 0 ? '超时' : '剩余';
+    else if (isActive) stat = S.running ? '计时中' : '暂停';
+    else stat = S.active === null ? '待机' : '等待';
+    setText(s.stat, stat);
+
+    var hint;
+    if (S.ended) hint = '';
+    else if (S.active === null) hint = '点击开始计时';
+    else if (!isActive) hint = '';
+    else if (!S.running) hint = '点击继续计时';
+    else hint = S.cfg.incSec > 0 ? '点击交棒 · 本方 +' + S.cfg.incSec + ' 秒' : '点击交棒 · 不加秒';
+    setText(s.hint, hint);
+  }
+
+  // ---------- 设置面板 ----------
+  function buildChips() {
+    el.initChips.innerHTML = '';
+    INIT_CHOICES.forEach(function (sec) {
+      var b = document.createElement('button');
+      b.className = 'chip';
+      b.dataset.sec = sec;
+      b.textContent = fmtSec(sec);
+      b.addEventListener('click', function () { setInit(sec); });
+      el.initChips.appendChild(b);
+    });
+    el.incChips.innerHTML = '';
+    INC_CHOICES.forEach(function (sec) {
+      var b = document.createElement('button');
+      b.className = 'chip';
+      b.dataset.sec = sec;
+      b.textContent = sec === 0 ? '不加' : '+' + sec + ' 秒';
+      b.addEventListener('click', function () { setInc(sec); });
+      el.incChips.appendChild(b);
+    });
+  }
+
+  function syncSetupUI() {
+    setText(el.initVal, fmtSec(S.cfg.initSec));
+    setText(el.incVal, '+' + S.cfg.incSec + ' 秒');
+    Array.prototype.forEach.call(el.initChips.children, function (b) {
+      b.classList.toggle('on', Number(b.dataset.sec) === S.cfg.initSec);
+    });
+    Array.prototype.forEach.call(el.incChips.children, function (b) {
+      b.classList.toggle('on', Number(b.dataset.sec) === S.cfg.incSec);
+    });
+    el.optSound.checked = S.cfg.sound;
+    el.optVibe.checked = S.cfg.vibrate;
+  }
+
+  function setInit(sec) {
+    S.cfg.initSec = clamp(Math.round(sec), 10, 7200);
+    saveCfg();
+    if (S.active === null && !S.ended) {
+      S.leftMs = S.rightMs = S.cfg.initSec * 1000;
+    }
+    syncSetupUI();
+    render();
+  }
+  function setInc(sec) {
+    S.cfg.incSec = clamp(Math.round(sec), 0, 600);
+    saveCfg();
+    syncSetupUI();
+    render();
+  }
+
+  function openSheet() {
+    if (S.active !== null) return;
+    syncSetupUI();
+    el.sheet.hidden = false;
+  }
+  function closeSheet() { el.sheet.hidden = true; }
+
+  // ---------- 事件 ----------
+  // 整块面板就是按钮：点正在计时的一侧 = 停本方、加秒、对方开始
+  function bindSide(side) {
+    var root = sides[side].root;
+    root.addEventListener('click', function () { tapSide(side); });
+    root.addEventListener('keydown', function (e) {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        tapSide(side);
+      }
+    });
+  }
+  bindSide('left');
+  bindSide('right');
+
+  el.btnPause.addEventListener('click', function () { togglePause(); });
+  el.btnSet.addEventListener('click', openSheet);
+  el.sheetClose.addEventListener('click', closeSheet);
+  el.sheet.addEventListener('click', function (e) { if (e.target === el.sheet) closeSheet(); });
+
+  el.btnFull.addEventListener('click', function () {
+    tryFullscreen(!document.fullscreenElement);
+  });
+
+  el.btnReset.addEventListener('click', function () {
+    if (S.active === null && !S.ended) { resetMatch(); return; }
+    el.confirm.hidden = false;
+  });
+  el.confirmNo.addEventListener('click', function () { el.confirm.hidden = true; });
+  el.confirmYes.addEventListener('click', function () { el.confirm.hidden = true; resetMatch(); });
+  el.confirm.addEventListener('click', function (e) { if (e.target === el.confirm) el.confirm.hidden = true; });
+
+  el.btnAgain.addEventListener('click', function () { resetMatch(); });
+  el.btnTune.addEventListener('click', function () { resetMatch(); openSheet(); });
+
+  el.optSound.addEventListener('change', function () {
+    S.cfg.sound = el.optSound.checked; saveCfg();
+    if (S.cfg.sound) { ensureAudio(); beep(760, 0.1, 0.2); }
+  });
+  el.optVibe.addEventListener('change', function () {
+    S.cfg.vibrate = el.optVibe.checked; saveCfg();
+    if (S.cfg.vibrate) haptic(30);
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-init]'), function (b) {
+    b.addEventListener('click', function () { setInit(S.cfg.initSec + Number(b.dataset.init)); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-inc]'), function (b) {
+    b.addEventListener('click', function () { setInc(S.cfg.incSec + Number(b.dataset.inc)); });
+  });
+
+  el.rotateOk.addEventListener('click', function () { el.rotate.classList.add('hide'); });
+
+  // 键盘（电脑预览用）：← / A 点左方，→ / D 点右方
+  document.addEventListener('keydown', function (e) {
+    if (e.target && e.target.closest && e.target.closest('.side')) return;
+    if (e.key === ' ' || e.key === 'Enter') {
+      if (!el.sheet.hidden || !el.confirm.hidden || !el.result.hidden) return;
+      e.preventDefault();
+      tapSide(S.active || 'left');
+    } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+      tapSide('left');
+    } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+      tapSide('right');
+    } else if (e.key === 'p' || e.key === 'P') {
+      togglePause();
+    } else if (e.key === 'r' || e.key === 'R') {
+      resetMatch();
+    } else if (e.key === 'f' || e.key === 'F') {
+      tryFullscreen(!document.fullscreenElement);
+    } else if (e.key === 'Escape') {
+      el.sheet.hidden = true;
+      el.confirm.hidden = true;
+    }
+  });
+
+  // 防止长按弹出菜单
+  document.addEventListener('contextmenu', function (e) {
+    if (e.target.closest && e.target.closest('.side')) e.preventDefault();
+  });
+
+  // 回到前台：立即结算，避免后台漏掉的时间
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') {
+      if (S.running) { acquireWake(); }
+      step();
+    }
+  });
+
+  // 暂停/继续时按钮状态
+  window.addEventListener('pageshow', function () { step(); });
+
+  // ---------- 启动 ----------
+  buildChips();
+  syncSetupUI();
+  render();
+
+  (function loop() {
+    step();
+    requestAnimationFrame(loop);
+  })();
+  // 兜底驱动：某些情况下（省电模式、画面无变化）rAF 会被节流，定时器保证计时与归零判定不停
+  setInterval(step, 100);
+
+  // 调试句柄（便于自动化检查，不影响正常使用）
+  window.__T = {
+    S: S, render: render, tapSide: tapSide, startWith: startWith, handOver: handOver,
+    resetMatch: resetMatch, finish: finish, setInit: setInit, setInc: setInc
+  };
+
+  // PWA：仅在 http(s) 下注册 Service Worker
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
